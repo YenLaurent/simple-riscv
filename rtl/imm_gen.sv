@@ -5,13 +5,13 @@ module imm_gen (
     input logic [31:0] instr,   // 32-bit instruction
     output logic [31:0] imm
 );
-    logic [31:0] imm_i = 32'(signed'(instr[31:20]));
-    logic [31:0] imm_s = 32'(signed'({instr[31:25], instr[11:7]}));
-    logic [31:0] imm_b = 32'(signed'({instr[31], instr[7], instr[30:25], instr[11:8], 1'b0}));
-    logic [31:0] imm_u = {instr[31:12], 12'b0};
-    logic [31:0] imm_j = 32'(signed'({instr[31], instr[19:12], instr[20], instr[30:21], 1'b0}));
+    logic [31:0] imm_i;
+    logic [31:0] imm_s;
+    logic [31:0] imm_b;
+    logic [31:0] imm_u;
+    logic [31:0] imm_j;
 
-    logic [6:0] opcode = instr[6:0];
+    logic [6:0] opcode;
 
     assign imm_i = 32'(signed'(instr[31:20]));
     assign imm_s = 32'(signed'({instr[31:25], instr[11:7]}));

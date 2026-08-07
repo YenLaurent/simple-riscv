@@ -23,4 +23,8 @@ module reg_file (
         if (we && rd_addr != 5'b0)
             x[rd_addr] <= rd_data;
 
+    initial     // 用于仿真初始化
+        for (int i = 0; i < 32; i++)
+            x[i] = 32'b0;
+
 endmodule
