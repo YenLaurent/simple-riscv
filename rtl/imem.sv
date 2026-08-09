@@ -12,6 +12,6 @@ module imem #(
 
     assign instr = mem[addr>>2];
 
-    initial $readmemh ("build/sw/full_test.mem", mem);      // 用于仿真初始化
+    initial $readmemh ("build/sw/test_prog.mem", mem);      // 用于仿真初始化
 
 endmodule

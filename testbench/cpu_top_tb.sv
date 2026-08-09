@@ -3,10 +3,14 @@
 module cpu_top_tb;
     logic clk = 1'b0;
     logic rst_n = 1'b1;
+    logic [63:0] mcycle;
+    logic [63:0] minstret;
 
     cpu_top u_cpu_top(
-        .clk   (clk   ),
-        .rst_n (rst_n )
+        .clk        (clk   ),
+        .rst_n      (rst_n ),
+        .mcycle     (mcycle),
+        .minstret   (minstret)
     );
 
     always #10 clk <= ~clk;     // 50MHz
@@ -24,13 +28,15 @@ module cpu_top_tb;
                 u_cpu_top.reg_file_inst.x[3],
                 u_cpu_top.reg_file_inst.x[20],
                 u_cpu_top.reg_file_inst.x[30]);
-        $display("DMEM[0x200]=%0h", u_cpu_top.dmem_inst.mem[128]);
+        $display("Total mcycle: %0d | Total minstret: %0d", 
+                 mcycle,
+                 minstret);
         $finish;
     end
 
     always @(posedge clk)
         if (u_cpu_top.dmem_inst.mem_write)
-            $display("t=%0t DMEM_WRITE addr=%0h wdata=%0h byte_en=%0b mask=%0h",
+            $display("t=%0t DMEM_WRITE addr=0x%0h wdata=0x%0h byte_en=%0b mask=%0h",
                     $time,
                     u_cpu_top.dmem_inst.addr,
                     u_cpu_top.dmem_inst.wdata,

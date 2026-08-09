@@ -3,7 +3,9 @@
 
 module cpu_top (
     input logic clk,
-    input logic rst_n
+    input logic rst_n,
+    output logic [63:0] mcycle,
+    output logic [63:0] minstret
 );
     logic [31:0] pc;
     logic [31:0] next_pc;
@@ -138,5 +140,18 @@ module cpu_top (
 
     assign alu_a = (opcode == 7'b0110111) ? 32'b0 :
                    (opcode == 7'b0010111) ? pc : rs1_data;
+
+    // Cycle Counter
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)
+            mcycle <= 64'b0;
+        else
+            mcycle <= mcycle + 64'd1;
+
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)
+            minstret <= 64'b0;
+        else if (instr !== 32'b0)
+            minstret <= minstret + 64'd1;
 
 endmodule
