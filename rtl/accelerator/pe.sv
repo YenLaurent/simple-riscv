@@ -7,7 +7,7 @@ module pe #(
 )(
     input logic clk,
     input logic rst_n,
-    input logic clear,
+    input logic clear,                  // 清除部分和，数据仍然向前流动
     input logic [DATA_WIDTH-1:0] a_in,
     input logic [DATA_WIDTH-1:0] b_in,
     output logic [DATA_WIDTH-1:0] a_out,
