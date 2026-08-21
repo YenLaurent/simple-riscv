@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 // CPU Top Module
+// 8/21: 已集成脉动阵列加速器至 CPU，地址范围: 0x300 - 0x330
 
 module cpu_top (
     input logic clk,
@@ -84,7 +85,7 @@ module cpu_top (
     lsu lsu_inst(
         .addr      (alu_result),
         .wdata     (rs2_data),
-        .rdata     (dmem_rdata),
+        .rdata     (lsu_rdata),
         .lsu_ctrl  (instr[14:12]),
         .mem_read  (mem_read),
         .mem_write (mem_write),
@@ -92,7 +93,35 @@ module cpu_top (
         .wdata_out (lsu_wdata_out),
         .byte_en   (lsu_byte_en)
     );
+
+    //* --------------------------------------------------
+    //* 接入加速器
+    logic acc_sel;
+    assign acc_sel = (alu_result >= 32'h300) && (alu_result <= 32'h330);  // 0x300 - 0x330 地址范围内的访问由加速器处理
     
+    logic [31:0] acc_rdata;
+    parameter DATA_WIDTH = 32;
+    parameter ACC_WIDTH = 2 * DATA_WIDTH + 2;
+
+    accelerator_top
+    #(
+        .DATA_WIDTH (DATA_WIDTH ),
+        .ACC_WIDTH  (ACC_WIDTH  )
+    ) accelerator_top_inst(
+        .clk       (clk       ),
+        .rst_n     (rst_n     ),
+        .addr      (alu_result),
+        .wdata     (lsu_wdata_out),
+        .mem_write (mem_write && acc_sel),
+        .mem_read  (mem_read  && acc_sel),
+        .rdata     (acc_rdata )
+    );
+
+    // 多路选择读取数据源：加速器或dmem
+    logic [31:0] lsu_rdata;
+    assign lsu_rdata = acc_sel ? acc_rdata : dmem_rdata;
+    //* --------------------------------------------------
+
     dmem #(
         .N      (1024)
     ) dmem_inst (
@@ -100,8 +129,8 @@ module cpu_top (
         .addr       (alu_result),
         .wdata      (lsu_wdata_out),
         .byte_en    (lsu_byte_en),
-        .mem_read   (mem_read),
-        .mem_write  (mem_write),
+        .mem_read   (mem_read && !acc_sel),
+        .mem_write  (mem_write && !acc_sel),
         .rdata      (dmem_rdata)
     );
 

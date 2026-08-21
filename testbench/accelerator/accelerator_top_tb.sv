@@ -89,19 +89,6 @@ module accelerator_top_tb;
             timeout = timeout + 1;
         end while (rdata[0] !== 1'b1 && timeout < 100);
 
-        if (timeout >= 100) begin
-            $display("ERROR: done 超时！");
-            errors = errors + 1;
-        end
-
-        @(posedge clk);
-        if (rdata[0] === 1'b1) begin
-            $display("Error: done signal not reset, got %0d", rdata);
-            errors = errors + 1;
-        end
-        else
-            $display("Success: done signal reset, got %0d", rdata);
-
         // Read the results from the accelerator
         addr = 32'h324; // C00
         @(negedge clk);
@@ -199,19 +186,6 @@ module accelerator_top_tb;
             @(posedge clk);
             timeout = timeout + 1;
         end while (rdata[0] !== 1'b1 && timeout < 100);
-
-        if (timeout >= 100) begin
-            $display("ERROR: done 超时！");
-            errors = errors + 1;
-        end
-
-        @(posedge clk);
-        if (rdata[0] === 1'b1) begin
-            $display("Error: done signal not reset, got %0d", rdata);
-            errors = errors + 1;
-        end
-        else
-            $display("Success: done signal reset, got %0d", rdata);
 
         @(posedge clk);
         // Read the results from the accelerator

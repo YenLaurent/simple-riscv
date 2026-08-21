@@ -2,6 +2,8 @@
 // 脉动阵列与CPU之间的接口模块，封装成内存
 // 脉动阵列数据地址范围: 0x300 - 0x330
 // 通过对0x320的位置写入1'b1来触发start信号，该地址在阵列计算完成后会被置位为done信号
+// TODO: 目前仅支持2x2矩阵乘法，后续可扩展为任意大小的矩阵乘法
+// TODO: 目前输出数据被截断到32位，后续可扩展为64位或更高精度的输出
 
 module accelerator_top #(
     parameter DATA_WIDTH = 32,
@@ -146,6 +148,17 @@ module accelerator_top #(
                 b_feed[1] = 'b0;
             end
         endcase
+
+    logic done_flag;   // 粘性完成标志：置位后保持，直到下一次 start
+
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)
+            done_flag <= 1'b0;
+        else if (start)
+            done_flag <= 1'b0;              // 新一轮计算开始，标志复位
+        else if (current_state == DONE)
+            done_flag <= 1'b1;              // 计算完成，标志置位
+
     
     //* Read data (combinational)
     logic [ACC_WIDTH-1:0] c00_live, c00_snap;
@@ -160,7 +173,7 @@ module accelerator_top #(
             c10_snap <= 'b0;
             c11_snap <= 'b0;
         end
-        else if (done) begin        // 单独将输出数据寄存，方便读取
+        else if (done) begin                // 单独将输出数据寄存，方便读取
             c00_snap <= c00_live;
             c01_snap <= c01_live;
             c10_snap <= c10_live;
@@ -168,7 +181,7 @@ module accelerator_top #(
         end
 
     logic [31:0] c00_lo, c01_lo, c10_lo, c11_lo;
-    assign c00_lo = c00_snap[31:0];   // 预提取，绕开 iverilog 限制
+    assign c00_lo = c00_snap[31:0];         // 预提取，绕开 iverilog 限制
     assign c01_lo = c01_snap[31:0];
     assign c10_lo = c10_snap[31:0];
     assign c11_lo = c11_snap[31:0];
@@ -183,9 +196,9 @@ module accelerator_top #(
                 32'h310: rdata = B00;
                 32'h314: rdata = B01;
                 32'h318: rdata = B10;
-                32'h31c: rdata = B11;               // 输入的矩阵可回读
-                32'h320: rdata = {31'b0, done};     // 计算完成标志，与写入触发start状态的地址相同
-                32'h324: rdata = c00_lo;      // 输出截断至32位(仅供测试)
+                32'h31c: rdata = B11;                       // 输入的矩阵可回读
+                32'h320: rdata = {31'b0, done_flag};        // 计算完成标志，与写入触发start状态的地址相同
+                32'h324: rdata = c00_lo;                    // 输出截断至32位(仅供测试)
                 32'h328: rdata = c01_lo;
                 32'h32c: rdata = c10_lo;
                 32'h330: rdata = c11_lo;
