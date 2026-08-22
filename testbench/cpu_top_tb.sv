@@ -41,7 +41,7 @@ module cpu_top_tb;
             $display("=== DONE MARKER ===");
             $display("check 0x200 = 0x%0h  (0x600 = all pass)",
                      u_cpu_top.dmem_inst.mem[32'h200>>2]);
-            $display("C = [%0d, %0d, %0d, %0d]  (expect 19, 22, 43, 50)",
+            $display("C = [%0d, %0d, %0d, %0d]",
                      u_cpu_top.dmem_inst.mem[32'h20c>>2],
                      u_cpu_top.dmem_inst.mem[32'h210>>2],
                      u_cpu_top.dmem_inst.mem[32'h214>>2],

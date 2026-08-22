@@ -1,13 +1,13 @@
 `timescale 1ns / 1ps
 // 脉动阵列与CPU之间的接口模块，封装成内存
-// 脉动阵列数据地址范围: 0x300 - 0x330
-// 通过对0x320的位置写入1'b1来触发start信号，该地址在阵列计算完成后会被置位为done信号
-// TODO: 目前仅支持2x2矩阵乘法，后续可扩展为任意大小的矩阵乘法
-// TODO: 目前输出数据被截断到32位，后续可扩展为64位或更高精度的输出
+// 脉动阵列数据地址范围: 0x300 -（32'h324 + 16 * K_MAX）
+// 通过对32'h300 + 16 * K_MAX的位置写入1'b1来触发start信号，该地址在阵列计算完成后会被置位为done信号
+// 当前硬件已支持任意2xk * kx2维度的矩阵乘法，最大内积维度为K_MAX，输出数据被截断至64位
 
 module accelerator_top #(
     parameter DATA_WIDTH = 32,
-    parameter ACC_WIDTH = 2 * DATA_WIDTH + 2
+    parameter ACC_WIDTH = 2 * DATA_WIDTH + 6,
+    parameter K_MAX = 16                        // 支持2xK * Kx2矩阵乘法，K最大值为16
 )(
     input logic clk,
     input logic rst_n,
@@ -19,46 +19,38 @@ module accelerator_top #(
 );
     //* Write data (sequential)
     // Two 2x2 matrix: A & B
-    logic [DATA_WIDTH-1:0] A00;
-    logic [DATA_WIDTH-1:0] A01;
-    logic [DATA_WIDTH-1:0] A10;
-    logic [DATA_WIDTH-1:0] A11;
-    logic [DATA_WIDTH-1:0] B00;
-    logic [DATA_WIDTH-1:0] B01;
-    logic [DATA_WIDTH-1:0] B10;
-    logic [DATA_WIDTH-1:0] B11;
+    logic [DATA_WIDTH-1:0] a_buf[0:2*K_MAX-1];  // 2xK matrix A, stored in row-major order, [0:K_MAX-1] for row 0, [K_MAX:2*K_MAX-1] for row 1
+    logic [DATA_WIDTH-1:0] b_buf[0:2*K_MAX-1];  // Kx2 matrix B, stored in column-major order, [0:K_MAX-1] for column 0, [K_MAX:2*K_MAX-1] for column 1
 
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n) begin
-            A00 <= 'b0;
-            A01 <= 'b0;
-            A10 <= 'b0;
-            A11 <= 'b0;
-            B00 <= 'b0;
-            B01 <= 'b0;
-            B10 <= 'b0;
-            B11 <= 'b0;
+            for (int i = 0; i < 2*K_MAX; i++) begin
+                a_buf[i] <= 'b0;
+                b_buf[i] <= 'b0;
+            end
+            k <= 5'd2;
         end
         else if (mem_write)
-            case (addr)                 // 0x300 - 0x320 for systolic array
-                32'h300: A00 <= wdata;
-                32'h304: A01 <= wdata;
-                32'h308: A10 <= wdata;
-                32'h30c: A11 <= wdata;
-                32'h310: B00 <= wdata;
-                32'h314: B01 <= wdata;
-                32'h318: B10 <= wdata;
-                32'h31c: B11 <= wdata;
-            endcase
+            if ((addr >= 32'h300) && (addr < 32'h300 + 8 * K_MAX))
+                a_buf[(addr - 32'h300) >> 2] <= wdata;                  // 写入A矩阵
+            else if ((addr >= 32'h300 + 8 * K_MAX) && (addr < 32'h300 + 16 * K_MAX))
+                b_buf[(addr - (32'h300 + 8 * K_MAX)) >> 2] <= wdata;    // 写入B矩阵
+            else if (addr == 32'h304 + 16 * K_MAX)
+                k <= (wdata[4:0] > K_MAX) ? K_MAX : wdata[4:0];    
+                // K内积维度的写入：CPU需要在start之前写入K值，范围为1 - K_MAX
 
     //* FSM for systolic array data & control signals
-    localparam logic [2:0] IDLE = 3'd0, FEED0 = 3'd1, FEED1 = 3'd2,
-                        FEED2 = 3'd3, FEED3 = 3'd4, DONE  = 3'd5;
+    localparam logic [2:0] IDLE = 3'b100;
+    localparam logic [2:0] FEED = 3'b010;
+    localparam logic [2:0] DONE = 3'b001;
     logic [2:0] current_state, next_state;
+    logic [7:0] t;                          // FEED状态计数器，0 - (K+1)
+    logic [7:0] next_t;
+    logic [4:0] k;                          // 实际的内积维度K值，1 - K_MAX，CPU需要在start之前写入
 
     logic start;
-    assign start = mem_write && (addr == 32'h320) && wdata[0];
-    //! 通过对0x320的位置写入1'b1来触发start信号
+    assign start = mem_write && (addr == (32'h300 + 16 * K_MAX)) && wdata[0];
+    //! 通过对32'h300 + 16 * K_MAX的位置写入1'b1来触发start信号
 
     // Outputs of FSM
     logic clear;
@@ -67,20 +59,36 @@ module accelerator_top #(
     logic [DATA_WIDTH-1:0] b_feed[1:0];
 
     always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)
+        if (!rst_n) begin
             current_state <= IDLE;
-        else
+            t <= 8'b0;
+        end
+        else begin
             current_state <= next_state;
+            t <= next_t;
+        end
 
     always_comb
         case (current_state)
-            IDLE: next_state = start ? FEED0 : IDLE;
-            FEED0: next_state = FEED1;
-            FEED1: next_state = FEED2;
-            FEED2: next_state = FEED3;
-            FEED3: next_state = DONE;
-            DONE: next_state = start ? FEED0 : IDLE;
-            default: next_state = IDLE;
+            IDLE: begin
+                next_t = 8'b0;
+                next_state = start ? FEED : IDLE;
+            end
+
+            FEED: begin
+                next_t = t + 8'd1;
+                next_state = (t == (k + 'd1)) ? DONE : FEED;      // 喂数据要喂到k次，第k+1次时等待PE11计算结束
+            end
+            
+            DONE: begin
+                next_t = 8'd0;
+                next_state = start ? FEED : IDLE;
+            end
+
+            default: begin
+                next_state = IDLE;
+                next_t = 8'd0;
+            end
         endcase
 
     always_comb
@@ -94,40 +102,13 @@ module accelerator_top #(
                 b_feed[1] = 'b0;
             end
 
-            FEED0: begin
+            FEED: begin
                 clear = 1'b0;
                 done = 1'b0;
-                a_feed[0] = A00;
-                a_feed[1] = 'b0;
-                b_feed[0] = B00;
-                b_feed[1] = 'b0;
-            end
-
-            FEED1: begin
-                clear = 1'b0;
-                done = 1'b0;
-                a_feed[0] = A01;
-                a_feed[1] = A10;
-                b_feed[0] = B10;
-                b_feed[1] = B01;
-            end
-
-            FEED2: begin
-                clear = 1'b0;
-                done = 1'b0;
-                a_feed[0] = 'b0;
-                a_feed[1] = A11;
-                b_feed[0] = 'b0;
-                b_feed[1] = B11;
-            end
-
-            FEED3: begin
-                clear = 1'b0;
-                done = 1'b0;
-                a_feed[0] = 'b0;
-                a_feed[1] = 'b0;
-                b_feed[0] = 'b0;
-                b_feed[1] = 'b0;
+                a_feed[0] = (t < k) ? a_buf[t] : 'b0;
+                b_feed[0] = (t < k) ? b_buf[t] : 'b0;
+                a_feed[1] = ((t >= 1) && (t < k+1)) ? a_buf[K_MAX + t - 1] : 'b0;
+                b_feed[1] = ((t >= 1) && (t < k+1)) ? b_buf[K_MAX + t - 1] : 'b0;
             end
 
             DONE: begin
@@ -181,29 +162,46 @@ module accelerator_top #(
         end
 
     logic [31:0] c00_lo, c01_lo, c10_lo, c11_lo;
-    assign c00_lo = c00_snap[31:0];         // 预提取，绕开 iverilog 限制
+    assign c00_lo = c00_snap[31:0];             // 预提取，绕开 iverilog 限制
     assign c01_lo = c01_snap[31:0];
     assign c10_lo = c10_snap[31:0];
     assign c11_lo = c11_snap[31:0];
 
+    logic [31:0] c00_hi, c01_hi, c10_hi, c11_hi;
+    assign c00_hi = c00_snap[63:32];            // 预提取，绕开 iverilog 限制
+    assign c01_hi = c01_snap[63:32];
+    assign c10_hi = c10_snap[63:32];
+    assign c11_hi = c11_snap[63:32];
+    // 高于64位的部分舍弃
+
     always_comb
         if (mem_read)
-            case (addr)
-                32'h300: rdata = A00;
-                32'h304: rdata = A01;
-                32'h308: rdata = A10;
-                32'h30c: rdata = A11;
-                32'h310: rdata = B00;
-                32'h314: rdata = B01;
-                32'h318: rdata = B10;
-                32'h31c: rdata = B11;                       // 输入的矩阵可回读
-                32'h320: rdata = {31'b0, done_flag};        // 计算完成标志，与写入触发start状态的地址相同
-                32'h324: rdata = c00_lo;                    // 输出截断至32位(仅供测试)
-                32'h328: rdata = c01_lo;
-                32'h32c: rdata = c10_lo;
-                32'h330: rdata = c11_lo;
-                default: rdata = 32'b0;
-            endcase
+            if ((addr >= 32'h300) && (addr < 32'h300 + 8 * K_MAX))
+                rdata = a_buf[(addr - 32'h300) >> 2];
+            else if ((addr >= 32'h300 + 8 * K_MAX) && (addr < 32'h300 + 16 * K_MAX))
+                rdata = b_buf[(addr - (32'h300 + 8 * K_MAX)) >> 2];
+            else if (addr == (32'h300 + 16 * K_MAX))
+                rdata = {31'b0, done_flag};
+            else if (addr == (32'h304 + 16 * K_MAX))
+                rdata = {27'b0, k};                     // 设计内积维度可回读
+            else if (addr == (32'h308 + 16 * K_MAX))
+                rdata = c00_lo;
+            else if (addr == (32'h30c + 16 * K_MAX))
+                rdata = c00_hi;
+            else if (addr == (32'h310 + 16 * K_MAX))
+                rdata = c01_lo;
+            else if (addr == (32'h314 + 16 * K_MAX))
+                rdata = c01_hi;
+            else if (addr == (32'h318 + 16 * K_MAX))
+                rdata = c10_lo;
+            else if (addr == (32'h31c + 16 * K_MAX))
+                rdata = c10_hi;
+            else if (addr == (32'h320 + 16 * K_MAX))
+                rdata = c11_lo;
+            else if (addr == (32'h324 + 16 * K_MAX))
+                rdata = c11_hi;
+            else
+                rdata = 32'b0;
         else 
             rdata = 32'b0;
 

@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 // CPU Top Module
-// 8/21: 已集成脉动阵列加速器至 CPU，地址范围: 0x300 - 0x330
+// 8/21: 已集成脉动阵列加速器至 CPU，地址范围: 0x300 - （32'h324 + 16 * K_MAX）
 
 module cpu_top (
     input logic clk,
@@ -97,16 +97,18 @@ module cpu_top (
     //* --------------------------------------------------
     //* 接入加速器
     logic acc_sel;
-    assign acc_sel = (alu_result >= 32'h300) && (alu_result <= 32'h330);  // 0x300 - 0x330 地址范围内的访问由加速器处理
+    assign acc_sel = (alu_result >= 32'h300) && (alu_result <= (32'h324 + 16 * K_MAX));  // 0x300 - (32'h324 + 16 * K_MAX) 地址范围内的访问由加速器处理
     
     logic [31:0] acc_rdata;
     parameter DATA_WIDTH = 32;
-    parameter ACC_WIDTH = 2 * DATA_WIDTH + 2;
+    parameter ACC_WIDTH = 2 * DATA_WIDTH + 6;
+    parameter K_MAX = 16;
 
     accelerator_top
     #(
         .DATA_WIDTH (DATA_WIDTH ),
-        .ACC_WIDTH  (ACC_WIDTH  )
+        .ACC_WIDTH  (ACC_WIDTH  ),
+        .K_MAX      (K_MAX)
     ) accelerator_top_inst(
         .clk       (clk       ),
         .rst_n     (rst_n     ),
